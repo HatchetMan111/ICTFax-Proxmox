@@ -539,8 +539,15 @@ if [[ "$TYPE" == "lxc" ]]; then
     # erst wget prüfen, sonst curl per apt nachinstallieren.
     if ! pct exec "$CT_ID" -- bash -lc "command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1"; then
       msg_info "Kein curl/wget im Gast – installiere curl ..."
-      pct exec "$CT_ID" -- bash -lc \
-        "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates" \
+      # DNS-Fix zuerst: apt läuft als _apt-Sandbox, die ohne 0644-Resolver
+      # und APT::Sandbox::User=root an "Temporary failure resolving" scheitert
+      # (bekannte Proxmox-LXC-Grube – siehe ictfax-inner.sh).
+      pct exec "$CT_ID" -- bash -lc '
+        chmod 0644 /etc/resolv.conf /etc/hosts /etc/nsswitch.conf 2>/dev/null || true
+        printf "APT::Sandbox::User \"root\";\n" > /etc/apt/apt.conf.d/99ictfax-curl
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
+      ' \
         || die "curl lässt sich im Gast nicht installieren – manueller Download: ${INNER_URL}"
     fi
     if pct exec "$CT_ID" -- bash -lc "command -v curl >/dev/null 2>&1"; then

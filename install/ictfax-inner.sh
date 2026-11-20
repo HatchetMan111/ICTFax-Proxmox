@@ -70,25 +70,61 @@ msg_info "Logdatei: ${LOG_FILE}"
 
 # ---------------------------------------------------------------------------
 # 1. DNS / apt robust machen (LXC hat oft kein systemd-resolved)
+#    Bekannte Grube: apt läuft als Sandbox-Benutzer _apt – der bekommt die
+#    Nameserver nicht aufgelöst, wenn /etc/resolv.conf nur 0644/root:104
+#    Rechte hat. Darum: Resolver-Dateien 0644 setzen UND Sandbox hart
+#    abschalten (root) – sonst scheitert apt trotz funktionierendem DNS.
 # ---------------------------------------------------------------------------
-if ! getent hosts deb.debian.org >/dev/null 2>&1; then
-  msg_warn "DNS-Auflösung fehlgeschlagen – setze temporär 1.1.1.1 / 9.9.9.9."
-  cat > /etc/resolv.conf <<'EOF'
+fix_dns() {
+  local resolved=1
+  getent hosts deb.debian.org >/dev/null 2>&1 || resolved=0
+  if [[ "$resolved" == "0" ]]; then
+    msg_warn "DNS-Auflösung fehlgeschlagen – setze 1.1.1.1 / 9.9.9.9."
+    # resolv.conf darf von keinem restriktiven umask(077)-Lauf 0600 erben.
+    cat > /etc/resolv.conf <<'EOF'
 nameserver 1.1.1.1
 nameserver 9.9.9.9
 EOF
-fi
+    chmod 0644 /etc/resolv.conf
+  fi
+  # /etc/hosts + nsswitch für den _apt-Sandbox-Benutzer lesbar halten.
+  chmod 0644 /etc/hosts /etc/nsswitch.conf 2>/dev/null || true
+  # apt-Sandbox abschalten: _apt scheitert sonst an nicht auflösbaren
+  # Nameservern, obwohl root längst kann (klassische Proxmox-LXC-Grube).
+  if ! grep -q 'APT::Sandbox::User' /etc/apt/apt.conf.d/99ictfax 2>/dev/null; then
+    printf 'APT::Sandbox::User "root";\n' >> /etc/apt/apt.conf.d/99ictfax
+  fi
+}
+
+# Basis-apt-Config (ohne Sandbox – die setzt fix_dns nach).
 cat > /etc/apt/apt.conf.d/99ictfax <<'EOF'
 Acquire::ForceIPv4 "true";
 Acquire::Retries "3";
+Acquire::http::Timeout "30";
 EOF
+fix_dns
+
+# apt-Operationen mit begrenztem Retry (DNS/Netz kann beim ersten Boot noch
+# wackeln – 3 Anläufe mit kurzer Pause fangen das zuverlässig ab).
+apt_retry() {
+  local n=1
+  until apt-get "$@"; do
+    if [[ $n -ge 3 ]]; then
+      msg_error "apt $* nach 3 Versuchen fehlgeschlagen."
+      return 1
+    fi
+    msg_warn "apt $* Versuch $n fehlgeschlagen – retry in 5s ..."
+    n=$((n + 1))
+    sleep 5
+  done
+}
 
 export DEBIAN_FRONTEND=noninteractive
 msg_info "Aktualisiere Paketlisten ..."
-apt-get update -qq
+apt_retry update -qq
 
 msg_info "Installiere Basispakete ..."
-apt-get install -y -qq --no-install-recommends \
+apt_retry install -y -qq --no-install-recommends \
   ca-certificates curl gnupg git jq openssl rsync xz-utils \
   iproute2 procps logrotate >/dev/null
 
@@ -108,8 +144,8 @@ install_docker() {
     . /etc/os-release
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" \
       > /etc/apt/sources.list.d/docker.list
-    apt-get update -qq || true
-    if apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1; then
+    apt_retry update -qq || true
+    if apt_retry install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1; then
       msg_ok "Docker CE installiert."
       return 0
     fi
@@ -117,7 +153,7 @@ install_docker() {
   else
     msg_warn "Docker-GPG-Key nicht ladbar – Fallback auf Debian-Pakete."
   fi
-  apt-get install -y -qq docker.io docker-compose >/dev/null
+  apt_retry install -y -qq docker.io docker-compose >/dev/null
   msg_ok "Docker (Debian) installiert."
 }
 install_docker
@@ -333,13 +369,13 @@ install_node() {
   fi
   msg_info "Installiere Node.js 22 ..."
   if curl -fsSL --max-time 60 https://deb.nodesource.com/setup_22.x -o /tmp/nodesource.sh; then
-    if bash /tmp/nodesource.sh >/dev/null 2>&1 && apt-get install -y -qq nodejs >/dev/null 2>&1; then
+    if bash /tmp/nodesource.sh >/dev/null 2>&1 && apt_retry install -y -qq nodejs >/dev/null 2>&1; then
       msg_ok "Node.js $(node -v) installiert."
       return 0
     fi
     msg_warn "NodeSource fehlgeschlagen – Fallback auf Debian nodejs/npm."
   fi
-  apt-get install -y -qq nodejs npm >/dev/null
+  apt_retry install -y -qq nodejs npm >/dev/null
   major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
   [[ "$major" -ge 18 ]] || die "Node.js >= 18 erforderlich (gefunden: $(node -v 2>/dev/null || echo none))."
   msg_ok "Node.js $(node -v) (Debian) installiert."
