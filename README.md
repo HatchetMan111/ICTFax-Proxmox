@@ -119,12 +119,13 @@ Client ──HTTP:8080──► Express-BFF ──HTTP:8081/api──► ICTFax 
 
 ## Erster Login
 
-- Portal: `http://<IP>:8080`
-- Native Admin-UI: `http://<IP>:8081`
-- Benutzer: `admin@ictcore.org`
+- Portal (Fax senden, Postausgang): `http://<IP>:8080`
+- Native Admin-UI (SIP-Trunk, DID, E-Mail→Fax, Benutzer): `http://<IP>:8081`
+- Benutzer: `admin`
 - Passwort: `helloAdmin`
 
-**Bitte sofort ändern** (im nativen Admin-UI unter Benutzer/Passwort).
+**Bitte sofort ändern** (im nativen Admin-UI unter Benutzer/Passwort – der
+User `admin@ictcore.org` existiert **nicht**, das ist nur die Demo-Mailadresse).
 
 ## Portal-API (BFF)
 

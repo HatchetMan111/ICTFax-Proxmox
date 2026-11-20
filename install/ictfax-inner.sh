@@ -9,7 +9,6 @@
 #   - systemd-Units, Firewall-Regeln, Selbstverifikation
 #
 set -Eeuo pipefail
-umask 077
 
 APP="ictfax"
 APP_DIR="/opt/ictfax"
@@ -30,6 +29,7 @@ DEBUG="${DEBUG:-0}"
 LOG_DIR="/var/log"
 [[ -w "$LOG_DIR" ]] || LOG_DIR="/tmp"
 LOG_FILE="${LOG_DIR}/${APP}-inner-$(date +%F-%H%M%S).log"
+umask 077
 exec > >(tee -i "$LOG_FILE") 2>&1
 
 if [[ -t 1 ]]; then
@@ -258,10 +258,40 @@ else
   echo "docker compose not available" >&2
   exit 1
 fi
+# mode=default|up|pull|ps|logs|down|restart|<compose args>
+MODE="${1:-up}"; shift || true
 if [[ "${SMTP_ENABLED:-1}" == "1" ]]; then
-  exec "${COMPOSE[@]}" -f compose.yml -f compose.smtp.yml "$@"
+  FILES=(-f compose.yml -f compose.smtp.yml)
+else
+  FILES=(-f compose.yml)
 fi
-exec "${COMPOSE[@]}" -f compose.yml "$@"
+case "$MODE" in
+  up)
+    # --wait: blockiert bis alle Container healthy/running sind. Das ist der
+    # Unterschied zwischen "compose up" (forked, sofort weg) und einem
+    # systemd-Dienst, der Vordergrund-Prozesse festhält (Live-Grube #3).
+    exec "${COMPOSE[@]}" "${FILES[@]}" up -d --remove-orphans --wait --wait-timeout 300
+    ;;
+  pull)
+    exec "${COMPOSE[@]}" "${FILES[@]}" pull --quiet
+    ;;
+  ps)
+    exec "${COMPOSE[@]}" "${FILES[@]}" ps
+    ;;
+  logs)
+    exec "${COMPOSE[@]}" "${FILES[@]}" logs --tail "${1:-100}" "${2:-}"
+    ;;
+  down)
+    exec "${COMPOSE[@]}" "${FILES[@]}" down --remove-orphans
+    ;;
+  restart)
+    exec "${COMPOSE[@]}" "${FILES[@]}" restart
+    ;;
+  *)
+    # alles andere 1:1 an compose durchreichen (z. B. "ictfax-compose exec db bash")
+    exec "${COMPOSE[@]}" "${FILES[@]}" "$MODE" "$@"
+    ;;
+esac
 WRAPPER
 chmod 0755 /usr/local/bin/ictfax-compose
 msg_ok "Compose-Wrapper: /usr/local/bin/ictfax-compose"
@@ -270,8 +300,8 @@ msg_ok "Compose-Wrapper: /usr/local/bin/ictfax-compose"
 # 7. ICTFax starten und auf API warten
 # ---------------------------------------------------------------------------
 msg_info "Starte ICTFax-Stack (Docker) ..."
-/usr/local/bin/ictfax-compose pull --quiet || msg_warn "Image-Pull fehlgeschlagen – nutze lokale Images."
-/usr/local/bin/ictfax-compose up -d --remove-orphans
+/usr/local/bin/ictfax-compose pull || msg_warn "Image-Pull fehlgeschlagen – nutze lokale Images."
+/usr/local/bin/ictfax-compose up
 
 msg_info "Warte auf ICTFax-API (Image-Init + DB-Schema, bis 12 Min) ..."
 API_OK=0
@@ -343,7 +373,10 @@ mkdir -p "${DATA_DIR}/portal"
 chown -R "${PORTAL_USER}:${PORTAL_USER}" "${DATA_DIR}/portal"
 chmod 755 "$APP_DIR"
 chown -R root:"$PORTAL_USER" "$APP_DIR/portal"
-chmod -R u=rwX,g=rX,o= "$APP_DIR/portal"
+# o+x auf die portal-Verzeichnisse: systemd startet den Dienst mit
+# ProtectSystem=strict + User=portal – ohne Leserecht auf portal/ und
+# portal/server/ startet node nicht (Live-Grube #4).
+chmod -R u=rwX,g=rX,o=rX "$APP_DIR/portal"
 
 for unit in ictfax.service ictfax-portal.service; do
   if [[ -f "$APP_DIR/systemd/$unit" ]]; then
@@ -425,6 +458,6 @@ echo "  Health        : http://${ICTCORE_HOST}:${PORTAL_PORT}/api/health"
 echo "  SIP           : 5060/tcp + 5060/udp"
 echo "  RTP           : 16384-16484/udp"
 [[ "$SMTP_ENABLED" == "1" ]] && echo "  E-Mail→Fax    : Port 25/tcp (MX auf ${ICTCORE_HOST} zeigen lassen)"
-echo "  Login         : admin@ictcore.org / helloAdmin  ← sofort ändern"
+echo "  Login         : admin / helloAdmin  ← sofort ändern"
 echo "  Log           : ${LOG_FILE}"
 echo "══════════════════════════════════════════════════════════"

@@ -8,8 +8,10 @@
 # (--type vm), installiert ICTFax (Docker) + das React/Vite-Portal und
 # verifiziert Service + Web-UI.
 #
+# WICHTIG: Das Skript muss auch per `bash -c "$(wget -qLO - ...)"` laufen,
+# bei dem BASH_SOURCE[0] undefiniert ist. Alles vor `set -u` (z. B. das
+# TEE-Logging) würde sonst mit "unbound variable" sterben.
 set -Eeuo pipefail
-umask 077
 
 APP="ictfax"
 APP_DISPLAY="ICTFax"
@@ -75,6 +77,7 @@ LOG_DIR="/var/log"
 LOG_FILE="${LOG_DIR}/${APP}-install-$(date +%F-%H%M%S).log"
 exec > >(tee -i "$LOG_FILE") 2>&1
 msg_info "Logdatei: ${LOG_FILE}"
+umask 077
 [[ "$DEBUG" == "1" ]] && { echo "--- DEBUG: set -x aktiv ---"; set -x; }
 
 on_error() {
@@ -336,7 +339,7 @@ verify_install() {
 }
 
 print_summary() {
-  local admin_user="admin@ictcore.org"
+  local admin_user="admin"
   local admin_pass="helloAdmin"
   echo ""
   echo "${C_BOLD}════════════════ INSTALLATION ERFOLGREICH ════════════════${C_RESET}"
@@ -345,7 +348,7 @@ print_summary() {
   echo "  Repo         : ${REPO_URL}"
   echo "  Typ          : ${TYPE^^} (ID ${CT_ID}, Name ${HOSTNAME_ARG}, onboot=1)"
   echo "  Ressourcen   : ${CORES} vCPU / ${RAM} MB RAM / ${DISK} GB Disk"
-  echo "  Portal       : http://${CT_IP}:${PORTAL_PORT}"
+  echo "  Portal       : http://${CT_IP}:${PORTAL_PORT}   ← React-Portal (Fax senden)"
   echo "  Admin-UI     : http://${CT_IP}:${ICTFAX_PORT}   (SIP-Trunk, DID, E-Mail)"
   echo "  Health       : http://${CT_IP}:${PORTAL_PORT}/api/health"
   echo "  SIP          : 5060/tcp + 5060/udp"
@@ -517,15 +520,34 @@ msg_ok "Adresse: ${CT_IP}"
 # 3. Inner-Installer im Gast ausführen
 # ---------------------------------------------------------------------------
 msg_info "Installiere ${APP_DISPLAY} im Gast ..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-LOCAL_INNER="${SCRIPT_DIR}/${APP}-inner.sh"
-
 if [[ "$TYPE" == "lxc" ]]; then
-  if [[ -f "$LOCAL_INNER" ]]; then
+  # Einzeiler-Modus (`bash -c "$(...)"`): BASH_SOURCE[0] ist undefiniert –
+  # unter `set -u` würde genau hier "unbound variable" sterben (Live-Grube #1).
+  # Der Default `:-` ist Pflicht; im Klon-Modus steht der echte Pfad drin.
+  # Achtung: dirname "" liefert "." (aktuelles Verzeichnis, hier /root) –
+  # deshalb prüfen wir BASH_SOURCE explizit, bevor SCRIPT_DIR gesetzt wird.
+  SCRIPT_DIR=""
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+  fi
+  LOCAL_INNER="${SCRIPT_DIR:-/tmp}/${APP}-inner.sh"
+  if [[ -n "$SCRIPT_DIR" && -f "$LOCAL_INNER" ]]; then
     pct push "$CT_ID" "$LOCAL_INNER" "/tmp/${APP}-inner.sh"
     msg_info "Inner-Script lokal übertragen: ${LOCAL_INNER}"
   else
-    pct exec "$CT_ID" -- bash -lc "curl -fsSL --max-time 120 -o /tmp/${APP}-inner.sh '${INNER_URL}?cb=$(date +%s)'"
+    # Das nackte Debian-12-LXC-Template hat kein curl (Live-Grube #2) –
+    # erst wget prüfen, sonst curl per apt nachinstallieren.
+    if ! pct exec "$CT_ID" -- bash -lc "command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1"; then
+      msg_info "Kein curl/wget im Gast – installiere curl ..."
+      pct exec "$CT_ID" -- bash -lc \
+        "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates" \
+        || die "curl lässt sich im Gast nicht installieren – manueller Download: ${INNER_URL}"
+    fi
+    if pct exec "$CT_ID" -- bash -lc "command -v curl >/dev/null 2>&1"; then
+      pct exec "$CT_ID" -- bash -lc "curl -fsSL --max-time 120 -o /tmp/${APP}-inner.sh '${INNER_URL}?cb=$(date +%s)'"
+    else
+      pct exec "$CT_ID" -- bash -lc "wget -q -O /tmp/${APP}-inner.sh '${INNER_URL}?cb=$(date +%s)'"
+    fi
     msg_info "Inner-Script im Gast geladen."
   fi
   pct exec "$CT_ID" -- env REPO_URL="$REPO_URL" REPO_REF="$REPO_REF" \

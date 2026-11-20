@@ -57,6 +57,69 @@ else
 fi
 
 say ""
+say "== Einzeiler-Modus (bash -c, BASH_SOURCE undefiniert) =="
+# Nur echte Expansionen zählen (einrückte Kommentare mit -- ignorieren).
+# Ohne Default killt `set -u` den Einzeiler mit "unbound variable".
+CODE="$(grep -vE '^[[:space:]]*#' "$ROOT/install/ictfax.sh")"
+if grep -q 'BASH_SOURCE\[0\}[^:}]' <<<"$CODE"; then
+  bad "BASH_SOURCE ohne Default expandiert – killt bash -c unter set -u"
+elif grep -q 'BASH_SOURCE\[0\]:-\|BASH_SOURCE\[0\]}' <<<"$CODE"; then
+  ok "BASH_SOURCE nur mit :- Default expandiert (bash-c-sicher)"
+else
+  bad "BASH_SOURCE gar nicht abgesichert – unerwarteter Zustand"
+fi
+# Regressionstest: Der Skriptkopf muss sich per bash -c ausführen lassen,
+# ohne an "unbound variable" zu sterben (Live-Grube #1). -n prüft nur Syntax,
+# der echte Test parst den Quelltext mitten aus dem String.
+if BASH_SOURCE_TEST="$(cat "$ROOT/install/ictfax.sh")" bash -c 'bash -n <<<"$BASH_SOURCE_TEST"' 2>/dev/null; then
+  ok "Syntax via bash -c-String gültig"
+else
+  bad "bash -c-String nicht parsbar"
+fi
+# Der Log-Block (exec tee) muss NACH set -u stehen – sonst unbound-variable.
+awk '/^set -[a-zA-Z]*u/{found=NR} /exec >.*tee/{if(found && NR>found) ok=1} END{exit !ok}' \
+  "$ROOT/install/ictfax.sh" \
+  && ok "tee-Logging steht nach set -u" \
+  || bad "tee-Logging steht vor/ohne set -u (Einzeiler-Grube)"
+# curl-fallback im LXC-Zweig: wget oder apt-install muss vor curl stehen
+if grep -q 'command -v wget' "$ROOT/install/ictfax.sh" \
+   || grep -q 'apt-get install.*curl' "$ROOT/install/ictfax.sh"; then
+  ok "curl-Fallback für nackte Templates vorhanden"
+else
+  bad "kein curl/wget-Fallback im Gast-Download"
+fi
+
+say ""
+say "== User()/Berechtigungen (systemd startet portal als User) =="
+if grep -q 'o=rX' "$ROOT/install/ictfax-inner.sh"; then
+  ok "portal-Verzeichnisse haben o+rX (node-Leserecht)"
+else
+  bad "portal-Verzeichnisse ohne o+rX – ictfax-portal.service startet nicht"
+fi
+if grep -q -- '--wait' "$ROOT/install/ictfax-inner.sh"; then
+  ok "compose up nutzt --wait (detached + healthy-Block)"
+else
+  bad "compose up ohne --wait (systemd-Dienst hält keine Container)"
+fi
+# Nur echte Login-Nennungen zählen – der README-Hinweis "existiert nicht"
+# ist ein gepinnter Syntaxfehler, kein Login. Zeilen mit "nicht"/"existiert"
+# filtern.
+if grep -h 'admin@ictcore.org' "$ROOT/README.md" "$ROOT/install/ictfax.sh" "$ROOT/install/ictfax-inner.sh" 2>/dev/null \
+   | grep -vE 'nicht|existiert' | grep -q 'admin@ictcore.org'; then
+  bad "Login nennt admin@ictcore.org – Demo-User heißt 'admin' (MD5 helloAdmin)"
+else
+  ok "Login-Dokumentation nutzt 'admin' (admin@ictcore.org nur als Nicht-Hinweis)"
+fi
+
+say ""
+say "== Upstream-Login verifiziert (Demo-User) =="
+if curl -fsS --max-time 20 -s "https://raw.githubusercontent.com/ictinnovations/ictcore/ae9ffcf00bcd923f1ade67fd3ee18b92ff779cd5/db/data/demo_users.sql" 2>/dev/null | grep -q "'admin', MD5('helloAdmin')"; then
+  ok "Upstream demo_users.sql: admin / MD5(helloAdmin) bestätigt"
+else
+  bad "Upstream-Demo-User nicht verifizierbar (Netz/DNS?)"
+fi
+
+say ""
 if [[ "$FAIL" == "0" ]]; then
   say "Ergebnis: OK"
 else

@@ -8,12 +8,16 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/ictfax/docker
-ExecStart=/usr/local/bin/ictfax-compose up --remove-orphans
+# ictfax-compose up = `docker compose up -d --wait` (detached + blockiert bis
+# healthy). Der Dienst bleibt "active" weil --wait läuft; sterben Container
+# oder startet der Daemon neu, beendet --wait sich != 0 → systemd restartet
+# (Restart=always) → Stack wird neu hochgezogen.
+ExecStart=/usr/local/bin/ictfax-compose up
 ExecStop=/usr/local/bin/ictfax-compose down
 ExecReload=/usr/local/bin/ictfax-compose restart
 Restart=always
 RestartSec=10
-TimeoutStartSec=0
+TimeoutStartSec=360
 TimeoutStopSec=180
 
 [Install]
