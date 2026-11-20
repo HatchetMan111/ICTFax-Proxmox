@@ -104,7 +104,9 @@ Acquire::http::Timeout "30";
 EOF
 fix_dns
 
-# apt-Operationen mit begrenztem Retry (DNS/Netz kann beim ersten Boot noch
+# Locale-Warnungen (perl/apt-listchanges) im Debian-12-Template stillen:
+# das Gast-Image bringt kein en_US.UTF-8 mit.
+export LC_ALL=C LANG=C LANGUAGE=
 # wackeln – 3 Anläufe mit kurzer Pause fangen das zuverlässig ab).
 apt_retry() {
   local n=1
@@ -296,10 +298,14 @@ else
 fi
 # mode=default|up|pull|ps|logs|down|restart|<compose args>
 MODE="${1:-up}"; shift || true
-if [[ "${SMTP_ENABLED:-1}" == "1" ]]; then
+# SMTP-Override nur, wenn der Gast-Port 25 frei ist (Debian-Standard-MTA
+# wie exim belegt ihn sonst → "failed to bind host port 0.0.0.0:25").
+if [[ "${SMTP_ENABLED:-1}" == "1" ]] \
+   && ! (ss -ltn 2>/dev/null | grep -q ':25 ' || true); then
   FILES=(-f compose.yml -f compose.smtp.yml)
 else
   FILES=(-f compose.yml)
+  [[ "${SMTP_ENABLED:-1}" == "1" ]] && echo "WARN: Port 25 im Gast belegt – E-Mail→Fax (25/tcp) deaktiviert; MTA zuerst anpassen."
 fi
 case "$MODE" in
   up)
@@ -331,6 +337,18 @@ esac
 WRAPPER
 chmod 0755 /usr/local/bin/ictfax-compose
 msg_ok "Compose-Wrapper: /usr/local/bin/ictfax-compose"
+
+# ---------------------------------------------------------------------------
+# 6b. SMTP-Port-25 vorab prüfen (compose.smtp.yml scheitert sonst hart)
+# ---------------------------------------------------------------------------
+if [[ "$SMTP_ENABLED" == "1" ]] && ss -ltn 2>/dev/null | grep -q ':25 '; then
+  msg_warn "Port 25/tcp im Gast bereits belegt (MTA?) – E-Mail→Fax wird deaktiviert."
+  msg_warn "Für E-Mail→Fax: MTA im Gast stoppen/entfernen und Re-Run mit SMTP_ENABLED=1."
+  SMTP_ENABLED=0
+  # Für den Wrapper sichtbar machen (ictfax.env wird vorab überschrieben,
+  # damit der --wait-Start das Override nicht lädt).
+  sed -i "s|^SMTP_ENABLED=.*|SMTP_ENABLED=0|" "$ETC_DIR/ictfax.env"
+fi
 
 # ---------------------------------------------------------------------------
 # 7. ICTFax starten und auf API warten
