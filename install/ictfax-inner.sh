@@ -455,7 +455,19 @@ systemctl enable ictfax.service ictfax-portal.service >/dev/null 2>&1 || true
 # runterfahren – darum nur einmal starten, nicht zweimal.
 systemctl restart ictfax.service
 sleep 5
+# Node-Opak: nodesource kann /usr/lib/node_modules/npm o-rwx setzen → node
+# scheitert beim Start an Permission denied auf eigene Module. Für den
+# Dienst unsichtbar machen (root liest trotzdem).
+chmod -R a+rX /usr/lib/node_modules 2>/dev/null || true
 systemctl restart ictfax-portal.service
+# Kurz warten und Status prüfen – startet node nicht, stirbt der Installer
+# hier mit klarer Fehlermeldung statt erst in der Verifikation.
+sleep 3
+if ! systemctl is-active --quiet ictfax-portal; then
+  msg_error "ictfax-portal.service startet nicht – letzte Logs:"
+  journalctl -u ictfax-portal --no-pager -n 30 || true
+  die "Portal-Dienst konnte nicht gestartet werden."
+fi
 msg_ok "systemd-Units installiert und gestartet."
 
 # ---------------------------------------------------------------------------
