@@ -1,0 +1,63 @@
+name: ictfax
+
+services:
+  db:
+    image: mariadb:10.11
+    container_name: ictfax-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?DB_ROOT_PASS missing}
+      MARIADB_DATABASE: ${DB_NAME:-ictfax}
+      MARIADB_USER: ${DB_USER:-ictfax}
+      MARIADB_PASSWORD: ${DB_PASS:?DB_PASS missing}
+    volumes:
+      - ictfax-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - ictfax
+
+  ictfax:
+    image: ictinnovations/ictfax:latest
+    container_name: ictfax
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ${ICTFAX_ENV_FILE:-/etc/ictfax/ictfax.env}
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-ictfax}
+      DB_USER: ${DB_USER:-ictfax}
+      DB_PASS: ${DB_PASS:?DB_PASS missing}
+      DB_ROOT_PASS: ${DB_ROOT_PASS:-}
+      ICTCORE_HOST: ${ICTCORE_HOST:-ictfax.local}
+      SIP_EXT_IP: ${SIP_EXT_IP:-}
+      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:?FS_ESL_PASSWORD missing}
+    ports:
+      - "${ICTFAX_PORT:-8081}:80"
+      - "5060:5060/tcp"
+      - "5060:5060/udp"
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      - ictfax-data:/usr/ictcore/data
+      - ictfax-log:/usr/ictcore/log
+    extra_hosts:
+      - "${ICTCORE_HOST:-ictfax.local}:127.0.0.1"
+    networks:
+      - ictfax
+
+volumes:
+  ictfax-db:
+  ictfax-data:
+  ictfax-log:
+
+networks:
+  ictfax:
+    driver: bridge

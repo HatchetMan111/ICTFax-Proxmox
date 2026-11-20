@@ -1,0 +1,4 @@
+services:
+  ictfax:
+    ports:
+      - "25:25/tcp"

@@ -1,0 +1,20 @@
+[Unit]
+Description=ICTFax (Docker Compose)
+Documentation=https://github.com/HatchetMan111/ICTFax-Proxmox
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ictfax/docker
+ExecStart=/usr/local/bin/ictfax-compose up --remove-orphans
+ExecStop=/usr/local/bin/ictfax-compose down
+ExecReload=/usr/local/bin/ictfax-compose restart
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

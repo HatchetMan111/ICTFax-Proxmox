@@ -1,0 +1,25 @@
+[Unit]
+Description=ICTFax React/Vite Portal (Express BFF)
+Documentation=https://github.com/HatchetMan111/ICTFax-Proxmox
+After=network-online.target ictfax.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ictfax-portal
+Group=ictfax-portal
+WorkingDirectory=/opt/ictfax/portal
+EnvironmentFile=/etc/ictfax-portal/config.env
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ictfax-portal
+StateDirectory=ictfax-portal
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
