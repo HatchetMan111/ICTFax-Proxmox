@@ -10,15 +10,14 @@ User=ictfax-portal
 Group=ictfax-portal
 WorkingDirectory=/opt/ictfax/portal
 EnvironmentFile=/etc/ictfax-portal/config.env
+# Wichtig: /usr/bin/node liest /etc/ssl/openssl.cnf (OpenSSL-Init). Die Datei
+# ist 0644, ABER /etc/ssl und /usr/lib/openssl müssen für den portal-User
+# traversierbar sein (0755). ProtectSystem=strict sperrte /usr + /etc als
+# read-only-mount → "Permission denied" beim fopen (Live-Grube). Darum:
+# keine Dateisystem-Sandbox, nur NoNewPrivileges + PrivateTmp.
 ExecStart=/usr/bin/node server/index.js
 Restart=always
 RestartSec=5
-# Der Portal-Dienst ist ein normaler Node-Prozess mit Lesezugriff auf
-# /usr (node), /etc/ssl (openssl.cnf) und /opt/ictfax. Keine Härtung, die
-# den Start bricht (ProtectSystem=strict hat /etc gesperrt → node starb
-# mit "fopen(/etc/ssl/openssl.cnf) Permission denied", selbst als root-
-# lesbare Datei, weil die Sandbox /etc read-only-for-other mountete).
-# Netzwerk bleibt offen (Port 8080). ReadWritePaths nur für /var/lib.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=false

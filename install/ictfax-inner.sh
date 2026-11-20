@@ -459,6 +459,22 @@ sleep 5
 # scheitert beim Start an Permission denied auf eigene Module. Für den
 # Dienst unsichtbar machen (root liest trotzdem).
 chmod -R a+rX /usr/lib/node_modules 2>/dev/null || true
+# Diagnose: node braucht /etc/ssl/openssl.cnf (0644) + traversierbare
+# Pfadkomponenten (/etc, /etc/ssl, /usr, /usr/lib). Rechte prüfen und
+# fehlende Leserechte setzen, BEVOR der Dienst startet.
+OPENSSL_CNF="/etc/ssl/openssl.cnf"
+if [[ -f "$OPENSSL_CNF" ]]; then
+  chmod 0644 "$OPENSSL_CNF"
+  for dir in /etc /etc/ssl /usr /usr/lib; do
+    [[ -d "$dir" ]] && chmod 0755 "$dir"
+  done
+  msg_info "openssl.cnf: $(stat -c '%A %U:%G' "$OPENSSL_CNF") (/etc/ssl: $(stat -c '%A' /etc/ssl))"
+else
+  msg_warn "openssl.cnf fehlt – OpenSSL-Init von node kann fehlschlagen."
+fi
+# portal-Verzeichnisse für den Dienst lesbar halten (0755/0644).
+chmod 0755 "$APP_DIR" "$APP_DIR/portal" "$APP_DIR/portal/dist" "$APP_DIR/portal/server" 2>/dev/null || true
+find "$APP_DIR/portal" -type f -exec chmod 0644 {} + 2>/dev/null || true
 systemctl restart ictfax-portal.service
 # Kurz warten und Status prüfen – startet node nicht, stirbt der Installer
 # hier mit klarer Fehlermeldung statt erst in der Verifikation.
