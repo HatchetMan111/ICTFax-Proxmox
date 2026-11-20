@@ -427,10 +427,18 @@ mkdir -p "${DATA_DIR}/portal"
 chown -R "${PORTAL_USER}:${PORTAL_USER}" "${DATA_DIR}/portal"
 chmod 755 "$APP_DIR"
 chown -R root:"$PORTAL_USER" "$APP_DIR/portal"
-# o+x auf die portal-Verzeichnisse: systemd startet den Dienst mit
-# ProtectSystem=strict + User=portal – ohne Leserecht auf portal/ und
-# portal/server/ startet node nicht (Live-Grube #4).
+# Verzeichnisse 0755, Dateien 0644, symlinks bleiben – portal läuft als
+# User portal (systemd), braucht also o+rX; die Wurzel portal/ bekommt
+# u=rwX,g=rX,o=rX **rekursiv** – das macht sie 0755 (X hebt für Verz. auf
+# 0755, für Dateien bleibt 0644). Wichtig: Die Wurzel darf NICHT auf 0555
+# gesetzt werden (Live-Grube: /opt/ictfax/portal war danach nicht mehr
+# traversierbar → node starb an /etc/ssl/openssl.cnf Permission denied).
 chmod -R u=rwX,g=rX,o=rX "$APP_DIR/portal"
+# /opt/ictfax selbst muss für portal traversierbar sein (x):
+chmod 0755 "$APP_DIR"
+# dist + server-Verzeichnisse explizit 0755, Dateien 0644 (falls die
+# npm-Installation restriktivere Rechte vererbt hat).
+chmod 0755 "$APP_DIR/portal" "$APP_DIR/portal/dist" "$APP_DIR/portal/server" 2>/dev/null || true
 
 for unit in ictfax.service ictfax-portal.service; do
   if [[ -f "$APP_DIR/systemd/$unit" ]]; then
@@ -442,7 +450,11 @@ done
 
 systemctl daemon-reload
 systemctl enable ictfax.service ictfax-portal.service >/dev/null 2>&1 || true
+# Reihenfolge: portal NACH ictfax (After=ictfax.service in der Unit). Der
+# Restart von ictfax am Ende würde den gerade gestarteten Stack wieder
+# runterfahren – darum nur einmal starten, nicht zweimal.
 systemctl restart ictfax.service
+sleep 5
 systemctl restart ictfax-portal.service
 msg_ok "systemd-Units installiert und gestartet."
 

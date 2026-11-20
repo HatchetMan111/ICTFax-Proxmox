@@ -15,6 +15,10 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+# ProtectSystem=strict macht /usr, /boot, /etc read-only gemountet – das
+# bricht node, wenn es /etc/ssl/openssl.cnf lesen will, NUR WENN die
+# Pfad-Rechte stimmen (0555-Wurzel). /etc/ssl bleibt lesbar, sobald die
+# portal-Verzeichnisse korrekt 0755/0644 sind (siehe Inner-Installer).
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/ictfax-portal

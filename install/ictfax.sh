@@ -99,7 +99,7 @@ on_error() {
       msg_error "journalctl (letzte 120 Zeilen):"
       pct exec "$CT_ID" -- journalctl -u ictfax -u ictfax-portal --no-pager -n 120 2>&1 || true
       msg_error "docker compose ps:"
-      pct exec "$CT_ID" -- bash -lc 'cd /opt/ictfax/docker && (docker compose ps || docker-compose ps) 2>&1' || true
+      pct exec "$CT_ID" -- bash -lc 'cd /opt/ictfax/docker && /usr/local/bin/ictfax-compose ps 2>&1 || docker compose ps 2>&1' || true
     elif command -v qm >/dev/null 2>&1; then
       msg_error "VM-Status:"
       qm status "$CT_ID" 2>&1 || true
