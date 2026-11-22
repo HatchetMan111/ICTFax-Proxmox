@@ -340,6 +340,7 @@ verify_install() {
 
 print_summary() {
   local admin_user="admin"
+  local admin_email="admin@ictcore.org"
   local admin_pass="helloAdmin"
   echo ""
   echo "${C_BOLD}════════════════ INSTALLATION ERFOLGREICH ════════════════${C_RESET}"
@@ -356,7 +357,7 @@ print_summary() {
   if [[ "$SMTP_ENABLED" == "1" ]]; then
     echo "  E-Mail→Fax   : Port 25/tcp (MX auf ${FAX_DOMAIN:-$CT_IP} zeigen lassen)"
   fi
-  echo "  Login        : ${admin_user} / ${admin_pass}  ← sofort ändern!"
+  echo "  Login        : ${admin_user} / ${admin_pass}  (oder ${admin_email} / ${admin_pass})  ← sofort ändern!"
   if [[ "$CREATED" == "1" && "$TYPE" == "lxc" && -n "$PASSWORD_ARG" ]]; then
     PASS_STORE="/root"; [[ -w "$PASS_STORE" ]] || PASS_STORE="${HOME:-$LOG_DIR}"
     PASS_FILE="${PASS_STORE}/${APP}-root-password"

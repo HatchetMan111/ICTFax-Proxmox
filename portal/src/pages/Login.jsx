@@ -70,8 +70,7 @@ export default function Login({ onLogin }) {
         </button>
 
         <p className="hint">
-          Erstlogin: <code>admin@ictcore.org</code> / <code>helloAdmin</code> – bitte sofort
-          ändern.
+          Erstlogin: <code>admin</code> oder <code>admin@ictcore.org</code> /{' '}<code>helloAdmin</code> – bitte sofort ändern.
         </p>
       </form>
     </div>
