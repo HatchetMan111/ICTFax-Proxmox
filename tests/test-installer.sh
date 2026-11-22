@@ -101,14 +101,14 @@ if grep -q -- '--wait' "$ROOT/install/ictfax-inner.sh"; then
 else
   bad "compose up ohne --wait (systemd-Dienst hält keine Container)"
 fi
-# Nur echte Login-Nennungen zählen – der README-Hinweis "existiert nicht"
-# ist ein gepinnter Syntaxfehler, kein Login. Zeilen mit "nicht"/"existiert"
-# filtern.
+# Login-Doku muss beide Varianten nennen (admin + admin@ictcore.org).
+# ICTCore akzeptiert beides – der Demo-User hat username='admin' und
+# email='admin@ictcore.org'.
 if grep -h 'admin@ictcore.org' "$ROOT/README.md" "$ROOT/install/ictfax.sh" "$ROOT/install/ictfax-inner.sh" 2>/dev/null \
    | grep -vE 'nicht|existiert' | grep -q 'admin@ictcore.org'; then
-  bad "Login nennt admin@ictcore.org – Demo-User heißt 'admin' (MD5 helloAdmin)"
+  ok "Login-Doku nennt beide Varianten (admin + admin@ictcore.org)"
 else
-  ok "Login-Dokumentation nutzt 'admin' (admin@ictcore.org nur als Nicht-Hinweis)"
+  bad "Login-Doku fehlt admin@ictcore.org – beide Varianten müssen genannt sein"
 fi
 
 say ""
