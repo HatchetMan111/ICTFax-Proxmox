@@ -107,7 +107,8 @@ fix_dns
 # Locale-Warnungen (perl/apt-listchanges) im Debian-12-Template stillen:
 # das Gast-Image bringt kein en_US.UTF-8 mit.
 export LC_ALL=C LANG=C LANGUAGE=
-# wackeln – 3 Anläufe mit kurzer Pause fangen das zuverlässig ab).
+# apt/Get kann im frischen LXC kurzzeitig wackeln – 3 Anläufe mit kurzer
+# Pause fangen das zuverlässig ab.
 apt_retry() {
   local n=1
   until apt-get "$@"; do
@@ -312,7 +313,9 @@ case "$MODE" in
     # --wait: blockiert bis alle Container healthy/running sind. Das ist der
     # Unterschied zwischen "compose up" (forked, sofort weg) und einem
     # systemd-Dienst, der Vordergrund-Prozesse festhält (Live-Grube #3).
-    exec "${COMPOSE[@]}" "${FILES[@]}" up -d --remove-orphans --wait --wait-timeout 300
+    # Wichtig: Der Aufruf EXITIERT danach – ictfax.service ist deshalb
+    # Type=oneshot + RemainAfterExit, nicht Type=simple.
+    exec "${COMPOSE[@]}" "${FILES[@]}" up -d --remove-orphans --wait --wait-timeout 900
     ;;
   pull)
     exec "${COMPOSE[@]}" "${FILES[@]}" pull --quiet
@@ -321,7 +324,8 @@ case "$MODE" in
     exec "${COMPOSE[@]}" "${FILES[@]}" ps
     ;;
   logs)
-    exec "${COMPOSE[@]}" "${FILES[@]}" logs --tail "${1:-100}" "${2:-}"
+    shift || true
+    exec "${COMPOSE[@]}" "${FILES[@]}" logs --tail "${1:-100}" "$@"
     ;;
   down)
     exec "${COMPOSE[@]}" "${FILES[@]}" down --remove-orphans

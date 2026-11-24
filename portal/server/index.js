@@ -43,6 +43,7 @@ const PORT = Number(process.env.PORT || 8080)
 const SESSION_SECRET = process.env.SESSION_SECRET || ''
 const COOKIE_SECURE = process.env.COOKIE_SECURE === '1'
 const NODE_ENV = process.env.NODE_ENV || 'development'
+const LOG_REQUESTS = process.env.PORTAL_LOG !== '0'
 
 if (NODE_ENV === 'production' && !SESSION_SECRET) {
   console.error('[portal] FATAL: SESSION_SECRET is missing.')
@@ -89,8 +90,20 @@ function asList(data) {
 export function safeMessage(data, fallback) {
   if (!data) return fallback
   if (typeof data === 'string') return data.slice(0, 300)
-  return data.message || data.error?.message || data.error || fallback
+  if (typeof data !== 'object') return fallback
+  if (typeof data.message === 'string' && data.message) return data.message.slice(0, 300)
+  const err = data.error
+  if (typeof err === 'string' && err) return err.slice(0, 300)
+  if (err && typeof err === 'object' && typeof err.message === 'string' && err.message) {
+    return err.message.slice(0, 300)
+  }
+  return fallback
 }
+
+// ICTCore accepts basic|standard|fine|super|superior|ultra (see
+// ICT\Core\Message\Document::set_quality). "superfine" is silently ignored
+// upstream and would fall back to 204x98, so it is not offered.
+const QUALITIES = ['basic', 'standard', 'fine', 'super', 'superior', 'ultra']
 
 async function apiFetch(pathname, options = {}) {
   const {
@@ -142,21 +155,68 @@ async function apiJson(pathname, options = {}) {
   return data
 }
 
-async function getTokenPayload(token) {
+function readToken(req) {
+  return req.signedCookies?.ictfax_token || null
+}
+
+function clearSessionCookies(res) {
+  const opts = { ...COOKIE_OPTS, maxAge: undefined }
+  res.clearCookie('ictfax_token', opts)
+  res.clearCookie('ictfax_profile', opts)
+}
+
+function readProfile(req) {
+  const raw = req.signedCookies?.ictfax_profile
+  if (!raw) return null
   try {
-    const { res, data } = await apiFetch('/token_payload', {
-      method: 'POST',
-      body: { token },
-      timeout: 10000,
-    })
-    return res.ok ? data : null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
   } catch {
     return null
   }
 }
 
-function readToken(req) {
-  return req.signedCookies?.ictfax_token || null
+// The JWT is signed by ICTCore (RS256). We only read the payload to show the
+// user name without an extra round trip; every real API call still carries the
+// token and is verified by ICTCore itself.
+function decodeJwtPayload(token) {
+  try {
+    const part = String(token).split('.')[1]
+    if (!part) return null
+    const json = Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
+}
+
+function profileFromUser(data, fallbackUsername) {
+  const name = [data?.first_name, data?.last_name].filter(Boolean).join(' ').trim()
+  return {
+    username: data?.username || data?.email || fallbackUsername || null,
+    email: data?.email || null,
+    user_id: data?.user_id ?? null,
+    name: name || null,
+    is_admin: data?.is_admin ?? null,
+  }
+}
+
+// ICTCore has no /token_payload endpoint (the upstream Angular client only
+// calls it for SAML login). Probing it returned 404 and the portal used to
+// delete a perfectly valid session cookie because of that. Verify the token
+// against a real authenticated endpoint instead.
+//   true  -> token accepted
+//   false -> token rejected (expired, revoked, wrong password)
+//   null  -> ICTFax unreachable, keep the session (signed cookie, UI stays up)
+async function verifyToken(token) {
+  try {
+    const { res } = await apiFetch('/statistics', { token, timeout: 8000 })
+    if (res.ok) return true
+    if (res.status === 401 || res.status === 403) return false
+    return null
+  } catch {
+    return null
+  }
 }
 
 function requireAuth(req, res, next) {
@@ -174,9 +234,7 @@ async function createDocument(token, file, fields) {
     throw err
   }
   const name = (fields.title || file.originalname || 'Fax').toString().slice(0, 120)
-  const quality = ['standard', 'fine', 'superfine'].includes(fields.quality)
-    ? fields.quality
-    : 'standard'
+  const quality = QUALITIES.includes(fields.quality) ? fields.quality : 'standard'
   const payload = {
     name,
     file_name: file.originalname || `${name}.${ext}`,
@@ -235,6 +293,7 @@ export function createApp() {
   app.use(cookieParser(SECRET))
 
   app.use((req, res, next) => {
+    if (!LOG_REQUESTS) return next()
     const started = Date.now()
     res.on('finish', () => {
       console.log(
@@ -272,11 +331,12 @@ export function createApp() {
       })
       const token = data?.token || data?.access_token
       if (!token) return res.status(401).json({ error: 'Login fehlgeschlagen.' })
+      const user = profileFromUser(data, username)
       res.cookie('ictfax_token', token, COOKIE_OPTS)
-      const user = await getTokenPayload(token)
+      res.cookie('ictfax_profile', JSON.stringify(user), COOKIE_OPTS)
       return res.json({
         ok: true,
-        user: user || { username },
+        user,
         ictfaxUrl: process.env.ICTFAX_PUBLIC_URL || null,
       })
     } catch (err) {
@@ -286,22 +346,79 @@ export function createApp() {
   })
 
   app.post('/api/session/logout', (req, res) => {
-    res.clearCookie('ictfax_token', { ...COOKIE_OPTS, maxAge: undefined })
+    clearSessionCookies(res)
     res.json({ ok: true })
   })
 
   app.get('/api/session', async (req, res) => {
     const token = readToken(req)
     if (!token) return res.json({ authenticated: false })
-    const user = await getTokenPayload(token)
-    if (!user) {
-      res.clearCookie('ictfax_token', { ...COOKIE_OPTS, maxAge: undefined })
+    const valid = await verifyToken(token)
+    if (valid === false) {
+      clearSessionCookies(res)
       return res.json({ authenticated: false })
+    }
+    const stored = readProfile(req)
+    const claims = decodeJwtPayload(token)
+    const user = stored || {
+      username: claims?.username || null,
+      user_id: claims?.user_id ?? null,
+      is_admin: claims?.is_admin ?? null,
     }
     return res.json({
       authenticated: true,
       user,
       ictfaxUrl: process.env.ICTFAX_PUBLIC_URL || null,
+    })
+  })
+
+  app.get('/api/setup', requireAuth, async (req, res) => {
+    const token = req.ictfaxToken
+    const [health, accounts, providers, stats] = await Promise.allSettled([
+      apiFetch('/statistics', { token, timeout: 8000 }),
+      apiJson('/accounts', { token }),
+      apiJson('/providers', { token }),
+      apiJson('/statistics', { token }),
+    ])
+    const pick = (r, fallback) => (r.status === 'fulfilled' ? r.value : fallback)
+
+    const accountList = asList(pick(accounts, []))
+    const providerList = asList(pick(providers, []))
+    const stat = pick(stats, {})
+    const cid = accountList.filter((a) => (a.type || a.account_type) === 'cid')
+    const did = accountList.filter((a) => (a.type || a.account_type) === 'did')
+    const backendOk =
+      health.status === 'fulfilled' && health.value.res && health.value.res.status < 500
+
+    const warnings = [accounts, providers, stats]
+      .filter((r) => r.status === 'rejected')
+      .map((r) => r.reason?.message || 'Upstream-Fehler')
+
+    res.json({
+      health: {
+        status: backendOk ? 'ok' : 'down',
+        code: health.status === 'fulfilled' ? health.value.res?.status : null,
+      },
+      accounts: {
+        total: accountList.length,
+        cid: cid.length,
+        did: did.length,
+        items: accountList.slice(0, 50),
+      },
+      providers: { total: providerList.length, items: providerList.slice(0, 50) },
+      stats: {
+        users: stat.user_total ?? 0,
+        transmissions_inbound: stat.transmission_inbound ?? 0,
+        transmissions_outbound: stat.transmission_outbound ?? 0,
+      },
+      checks: {
+        backend: backendOk,
+        caller_id: cid.length > 0,
+        did: did.length > 0,
+        sip: providerList.length > 0,
+      },
+      warnings,
+      nativeUrl: process.env.ICTFAX_PUBLIC_URL || null,
     })
   })
 

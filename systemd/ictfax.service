@@ -6,19 +6,23 @@ After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# `docker compose up -d --wait` stages the stack and EXITS once every
+# container is running/healthy. With Type=simple + Restart=always that made
+# systemd restart the unit every RestartSec forever: `systemctl is-active`
+# stayed in "activating (auto-restart)" and both the installer and the reboot
+# test failed even though the containers were up. oneshot + RemainAfterExit is
+# the correct shape for "run to completion, then stay active".
+Type=oneshot
+RemainAfterExit=yes
 WorkingDirectory=/opt/ictfax/docker
-# ictfax-compose up = `docker compose up -d --wait` (detached + blockiert bis
-# healthy). Der Dienst bleibt "active" weil --wait läuft; sterben Container
-# oder startet der Daemon neu, beendet --wait sich != 0 → systemd restartet
-# (Restart=always) → Stack wird neu hochgezogen.
 ExecStart=/usr/local/bin/ictfax-compose up
 ExecStop=/usr/local/bin/ictfax-compose down
-ExecReload=/usr/local/bin/ictfax-compose restart
-Restart=always
-RestartSec=10
-TimeoutStartSec=360
-TimeoutStopSec=180
+Restart=on-failure
+RestartSec=15
+# First boot pulls a ~630 MB image, initialises MariaDB and loads the schema.
+# That legitimately takes several minutes on a slow line.
+TimeoutStartSec=1800
+TimeoutStopSec=300
 
 [Install]
 WantedBy=multi-user.target

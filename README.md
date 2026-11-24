@@ -14,12 +14,15 @@ verifiziert anschließend Services und Web-UI.
   Debian-12-Cloud-Image-VM, per `--type vm`.
 - **ICTFax-Backend** als Docker-Compose-Stack (`ictinnovations/ictfax` + MariaDB 10.11).
 - **React/Vite-Portal** (`:8080`) mit Login, Dashboard, Faxversand, Postausgang,
-  Posteingang und Dokument-Download.
+  Posteingang, Dokument-Download und einer **Einrichtungs-Seite**, die prüft, ob
+  Backend, Caller-ID-Konto, SIP-Trunk und DIDs vorhanden sind, und direkt in den
+  ICTFax-Admin führt.
 - **Native ICTFax-Admin-UI** (`:8081`) für SIP-Trunk, DID, E-Mail→Fax und Provisioning.
 - **Eigene Secrets** in `/etc/ictfax/ictfax.env` und `/etc/ictfax-portal/config.env`
   (0600, idempotent, bleiben bei Updates erhalten).
-- **systemd**: `ictfax.service` (Compose) und `ictfax-portal.service` (Node-BFF),
-  beide `Restart=always`, `onboot=1` für den Gast.
+- **systemd**: `ictfax.service` (`Type=oneshot` + `RemainAfterExit`, damit
+  `docker compose up --wait` nicht in einer Restart-Schleife landet) und
+  `ictfax-portal.service` (Node-BFF), `onboot=1` für den Gast.
 - **Selbstverifikation** nach der Installation und `--reboot-test` für den
   Neustart-Test.
 - **Sichere Defaults**: unprivilegierter LXC, keine Default-Passwörter in Skripten,
@@ -136,13 +139,23 @@ Client ──HTTP:8080──► Express-BFF ──HTTP:8081/api──► ICTFax 
 |---------|------|-------|
 | POST | `/api/session/login` | Login, setzt HttpOnly-Cookie |
 | POST | `/api/session/logout` | Cookie löschen |
-| GET | `/api/session` | Session prüfen |
+| GET | `/api/session` | Session prüfen (Token gegen `/statistics` verifiziert) |
 | GET | `/api/health` | Healthcheck (ICTFax erreichbar?) |
+| GET | `/api/setup` | Bereitschaft: Backend, Konten (CID/DID), Provider, Statistik |
 | GET | `/api/dashboard` | Statistik + letzte Faxe + Konten |
 | GET | `/api/accounts` | Caller-ID-Konten |
 | GET | `/api/transmissions?direction=outbound\|inbound` | Übertragungen |
 | POST | `/api/fax/send` | Multipart: `file`, `phone`, `account_id`, `title`, `email`, `quality` |
 | GET | `/api/transmissions/:id/document` | Fax-Dokument herunterladen |
+
+`quality` akzeptiert `basic`, `standard`, `fine`, `super`, `superior` und `ultra`
+(die Werte, die ICTCore in `Document::set_quality()` kennt).
+
+> **Session-Verhalten:** ICTCore hat keinen Endpunkt `/api/token_payload` (der
+> Upstream-Client nutzt ihn nur für SAML-Logins). Das Portal verifiziert das
+> Token deshalb gegen `GET /api/statistics` und legt das Benutzerprofil in einem
+> zweiten signierten Cookie ab. Ist ICTFax kurz nicht erreichbar, bleibt die
+> Session erhalten; nur ein echtes 401/403 löscht sie.
 
 ## ICTFax-API-Flow (Fax senden)
 
@@ -200,6 +213,18 @@ Bei Fehlern werden `journalctl` und `docker compose ps` ausgegeben.
 - Der BFF setzt `HttpOnly`, `SameSite=Lax` und (optional) `Secure`-Cookies.
 
 ## Troubleshooting
+
+**Portal wirft nach dem Login sofort wieder raus / alle Aktionen 401**
+
+Der BFF prüft die Session gegen `GET /api/statistics`. Ein 401/403 löscht das
+Cookie, ein Netzfehler nicht. Ursachen für ein echtes Ausloggen:
+
+```bash
+journalctl -u ictfax-portal --no-pager -n 50
+# Token abgelaufen? ICTFax akzeptiert es nicht mehr:
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8081/api/statistics
+```
 
 **Portal zeigt 502 / „Upstream“-Fehler**
 
@@ -263,9 +288,11 @@ qm stop <ID> && qm destroy <ID>
 ## Tests
 
 ```bash
-bash tests/test-installer.sh     # Syntax, Pflichtdateien, Einzeiler
+bash tests/test-installer.sh     # Syntax, Pflichtdateien, systemd-Shape, Session-Regression
 bash tests/test-compose.sh       # Compose-Validierung (Docker nötig)
-cd portal && npm ci && npm test  # BFF-Unit-Tests
+cd portal && npm ci && npm run build && npm test
+# BFF-Unit-Tests + End-to-End-Test gegen einen ICTFax-Mock
+# (Login → Session-Reload → Dashboard → Fax senden → Dokument → Logout)
 ```
 
 ## Lizenz

@@ -90,6 +90,40 @@ else
 fi
 
 say ""
+say "== systemd: ictfax.service Shape =="
+# `docker compose up -d --wait` exits as soon as the containers are healthy.
+# With Type=simple + Restart=always systemd restarted the unit forever and
+# `systemctl is-active` stayed in "activating (auto-restart)" – the installer
+# and the reboot test failed although the stack was up.
+if grep -q '^Type=oneshot' "$ROOT/systemd/ictfax.service" \
+   && grep -q '^RemainAfterExit=yes' "$ROOT/systemd/ictfax.service"; then
+  ok "ictfax.service ist Type=oneshot + RemainAfterExit (kein Restart-Loop)"
+else
+  bad "ictfax.service muss Type=oneshot + RemainAfterExit sein (compose up --wait exitst)"
+fi
+if grep -q '^Restart=always' "$ROOT/systemd/ictfax.service"; then
+  bad "Restart=always auf Type=oneshot lässt is-active dauerhaft 'activating' melden"
+else
+  ok "kein Restart=always auf dem oneshot-Dienst"
+fi
+
+say ""
+say "== Portal: Session-Regression (token_payload) =="
+# ICTCore hat KEIN /api/token_payload. Das Portal hat damit nach dem Login
+# jedes Mal das Session-Cookie gelöscht → alle API-Aufrufe 401.
+if grep -q "token_payload" "$ROOT/portal/server/index.js" \
+   && ! grep -q "apiFetch('/token_payload'" "$ROOT/portal/server/index.js"; then
+  ok "Portal fragt token_payload nicht mehr als Session-Quelle ab"
+else
+  bad "Portal nutzt /token_payload als Session-Prüfung – ICTCore hat den Endpunkt nicht"
+fi
+if grep -q "verifyToken" "$ROOT/portal/server/index.js"; then
+  ok "Session wird gegen /statistics verifiziert (echter ICTFax-Endpunkt)"
+else
+  bad "Session-Verifikation fehlt"
+fi
+
+say ""
 say "== User()/Berechtigungen (systemd startet portal als User) =="
 if grep -q 'o=rX' "$ROOT/install/ictfax-inner.sh"; then
   ok "portal-Verzeichnisse haben o+rX (node-Leserecht)"

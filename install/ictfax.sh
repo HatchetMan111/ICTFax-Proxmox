@@ -445,8 +445,14 @@ if [[ "$EXISTING" == "0" ]]; then
     qm create "$CT_ID" --name "$HOSTNAME_ARG" --cores "$CORES" --memory "$RAM" \
       --net0 "virtio,bridge=${BRIDGE}" --onboot 1 --agent enabled=1 --ostype l26
     IMPORT_OUT="$(qm importdisk "$CT_ID" "$IMAGE_PATH" "$STORAGE_ARG")"
-    DISK_VOL="$(printf '%s\n' "$IMPORT_OUT" | sed -n "s/.*unused0:\([^']*\)'.*/\1/p" | tr -d '[:space:]')"
-    [[ -n "$DISK_VOL" ]] || DISK_VOL="${STORAGE_ARG}:vm-${CT_ID}-disk-0"
+    printf '%s\n' "$IMPORT_OUT"
+    # qm importdisk meldet z. B.:
+    #   unused0: successfully imported disk 'local-lvm:vm-100-disk-0'
+    # Ein gieriges `.*unused0:\([^']*\)'` fängt dabei " successfully imported
+    # disk " statt des Volumes – `qm set --scsi0` scheitert dann mit
+    # "invalid volume". Darum den Wert zuverlässig aus der VM-Config lesen.
+    DISK_VOL="$(qm config "$CT_ID" | sed -n 's/^unused0:[[:space:]]*//p' | tr -d '[:space:]')"
+    [[ -n "$DISK_VOL" ]] || die "Import-Disk nicht ermittelbar (unused0 fehlt in qm config)."
     qm set "$CT_ID" --scsihw virtio-scsi-pci --scsi0 "$DISK_VOL"
     qm resize "$CT_ID" scsi0 "${DISK}G"
     qm set "$CT_ID" --ide2 "${STORAGE_ARG}:cloudinit"

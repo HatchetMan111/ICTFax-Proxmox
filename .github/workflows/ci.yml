@@ -26,9 +26,9 @@ jobs:
           cache: npm
           cache-dependency-path: portal/package-lock.json
 
-      - name: Portal tests + build
+      - name: Portal build + tests
         working-directory: portal
         run: |
           npm ci --no-audit --no-fund
-          npm test
           npm run build
+          npm test

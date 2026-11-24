@@ -3,10 +3,15 @@
 # ICTFax-Diagnose (v2): Container-Port-Problem + Crash-Loop eingrenzen.
 # Auf dem Proxmox-Host als root ausführen:
 #
-#   bash diagnose-ictfax.sh [CT_ID]
+#   bash diagnose-ictfax.sh <CT_ID>
 #
 set -Eeuo pipefail
-CT="${1:-113}"
+CT="${1:-}"
+if [[ -z "$CT" ]]; then
+  echo "Usage: bash diagnose-ictfax.sh <CT_ID>" >&2
+  echo "  (Container bzw. VM-ID des ICTFax-Gasts, z. B. 113)" >&2
+  exit 2
+fi
 
 echo "════ ICTFax-Diagnose v2 CT ${CT} ════"
 

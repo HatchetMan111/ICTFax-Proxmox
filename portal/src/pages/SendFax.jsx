@@ -124,7 +124,8 @@ export default function SendFax() {
             <select value={quality} onChange={(e) => setQuality(e.target.value)}>
               <option value="standard">Standard</option>
               <option value="fine">Fine</option>
-              <option value="superfine">Superfine</option>
+              <option value="super">Super</option>
+              <option value="ultra">Ultra</option>
             </select>
           </label>
 

@@ -4,12 +4,14 @@ import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import SendFax from './pages/SendFax.jsx'
 import Transmissions from './pages/Transmissions.jsx'
+import Setup from './pages/Setup.jsx'
 
 const TABS = [
   { id: 'dashboard', label: 'Übersicht' },
   { id: 'send', label: 'Fax senden' },
   { id: 'outbox', label: 'Postausgang' },
   { id: 'inbox', label: 'Posteingang' },
+  { id: 'setup', label: 'Einrichtung' },
 ]
 
 export default function App() {
@@ -76,6 +78,7 @@ export default function App() {
         {tab === 'send' && <SendFax />}
         {tab === 'outbox' && <Transmissions direction="outbound" />}
         {tab === 'inbox' && <Transmissions direction="inbound" />}
+        {tab === 'setup' && <Setup />}
       </main>
 
       <footer className="footer">

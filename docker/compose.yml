@@ -48,6 +48,17 @@ services:
     volumes:
       - ictfax-data:/usr/ictcore/data
       - ictfax-log:/usr/ictcore/log
+    # The image ships a healthcheck with a 120s start period, which is too
+    # short for a first boot (schema load). Compose's --wait would declare the
+    # container unhealthy and the unit would restart mid-initialisation.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/index.html"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    # FreeSWITCH needs a moment to finish active fax calls on stop.
+    stop_grace_period: 45s
     extra_hosts:
       - "${ICTCORE_HOST:-ictfax.local}:127.0.0.1"
     networks:
